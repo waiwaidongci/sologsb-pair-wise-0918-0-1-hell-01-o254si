@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>钟表擒纵调校作业台</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-mark">⚙</span>
+        <div>
+          <h1>钟表擒纵调校作业台</h1>
+          <p>建档 · 登记调校 · 复测 · 筛选 · 历史追溯</p>
+        </div>
+      </div>
+      <div class="topbar-meta">
+        <span id="clockNow" class="clock-now"></span>
+        <button id="refreshBtn" class="btn btn-ghost" type="button">刷新状态</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel create-panel">
+      <h2><span class="panel-num">1</span>新建钟表档案</h2>
+      <form id="createForm" class="form-grid">
+        <label>钟表编号
+          <input name="code" required placeholder="如 CLK-1890-08" />
+        </label>
+        <label>擒纵机构
+          <select name="escapementType" required>
+            <option value="">请选择</option>
+            <option>瑞士杠杆式</option>
+            <option>同轴擒纵</option>
+            <option>锚式擒纵</option>
+            <option>圆柱式擒纵</option>
+            <option>销式擒纵</option>
+            <option>工字轮擒纵</option>
+            <option>自由擒纵</option>
+            <option>其他</option>
+          </select>
+        </label>
+        <label>摆频
+          <input name="balanceFrequency" required placeholder="如 21600vph" />
+        </label>
+        <label>允许日差(秒/天)
+          <input name="targetDailyRateSeconds" type="number" step="1" value="30" required />
+        </label>
+        <label class="span-2">备注
+          <input name="note" placeholder="机芯状况、客户要求等（选填）" />
+        </label>
+        <div class="form-actions span-2">
+          <button class="btn btn-primary" type="submit">建档并进入列表</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel list-panel">
+      <div class="panel-head">
+        <h2><span class="panel-num">2</span>在台钟表</h2>
+        <div class="stats" id="stats"></div>
+      </div>
+
+      <div class="filters" id="filters">
+        <button class="chip is-active" data-filter="all" type="button">全部</button>
+        <button class="chip" data-filter="NEEDS_ADJUSTMENT" type="button">待调校</button>
+        <button class="chip" data-filter="AWAITING_RETEST" type="button">待复测</button>
+        <button class="chip" data-filter="RETEST_FAILED" type="button">复测未达标</button>
+        <button class="chip" data-filter="READY_FOR_DELIVERY" type="button">待交付</button>
+        <button class="chip chip-overdue" data-filter="overdue" type="button">⏳ 超约定时间</button>
+        <input id="searchInput" class="search" type="search" placeholder="搜索编号 / 擒纵机构 / 备注" />
+      </div>
+
+      <div class="table-wrap">
+        <table class="clock-table">
+          <thead>
+            <tr>
+              <th>状态</th>
+              <th>编号</th>
+              <th>擒纵机构 / 摆频</th>
+              <th>允许日差</th>
+              <th>最近调校</th>
+              <th>约定复测</th>
+              <th>最近复测</th>
+              <th class="col-actions">操作</th>
+            </tr>
+          </thead>
+          <tbody id="clockTbody"></tbody>
+        </table>
+        <div id="emptyState" class="empty-state" hidden>没有符合筛选条件的钟表</div>
+      </div>
+      <p class="list-hint">超过约定复测时间的钟表自动置顶，并实时显示滞留时长；每 30 秒自动同步一次状态。</p>
+    </section>
+  </main>
+
+  <!-- 详情 / 操作抽屉 -->
+  <div id="modal" class="modal" hidden>
+    <div class="modal-mask" data-close="1"></div>
+    <aside class="modal-body" role="dialog" aria-modal="true" aria-label="钟表详情">
+      <header class="modal-head">
+        <div>
+          <h2 id="modalTitle">钟表详情</h2>
+          <p id="modalSub"></p>
+        </div>
+        <button class="modal-close" data-close="1" type="button" aria-label="关闭">×</button>
+      </header>
+      <div class="modal-content" id="modalContent"></div>
+    </aside>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
