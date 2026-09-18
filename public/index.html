@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>钟表调校作业台</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; background: #f1f5f9; color: #1e293b; font-size: 14px; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; background: #0f172a; color: #fff; }
+  header h1 { font-size: 18px; font-weight: 600; }
+  header .now { color: #94a3b8; font-variant-numeric: tabular-nums; margin-right: 12px; }
+  main { display: grid; grid-template-columns: 400px 1fr; gap: 16px; padding: 16px 20px; align-items: start; }
+  .panel { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; }
+  .panel-title { display: flex; align-items: center; justify-content: space-between; font-weight: 600; margin-bottom: 10px; }
+  button { cursor: pointer; border: 1px solid #cbd5e1; background: #fff; border-radius: 6px; padding: 6px 12px; font-size: 13px; color: #1e293b; }
+  button:hover { background: #f1f5f9; }
+  button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+  button.primary:hover { background: #1d4ed8; }
+  button.success { background: #059669; border-color: #059669; color: #fff; }
+  button.success:hover { background: #047857; }
+  button.ghost-light { background: transparent; border-color: #475569; color: #e2e8f0; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  form.card, .card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; margin-bottom: 12px; background: #f8fafc; }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+  .form-grid .full { grid-column: 1 / -1; }
+  label { display: block; font-size: 12px; color: #64748b; margin-bottom: 3px; }
+  input, select, textarea { width: 100%; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 8px; font-size: 13px; font-family: inherit; background: #fff; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid #bfdbfe; border-color: #2563eb; }
+  .form-actions { grid-column: 1 / -1; display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+  .filters { display: flex; gap: 8px; margin-bottom: 10px; }
+  .filters select { width: 140px; flex: none; }
+  .list { display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 260px); overflow-y: auto; }
+  .clock-item { border: 1px solid #e2e8f0; border-left: 4px solid #cbd5e1; border-radius: 8px; padding: 10px 12px; cursor: pointer; background: #fff; }
+  .clock-item:hover { background: #f8fafc; }
+  .clock-item.selected { border-left-color: #2563eb; background: #eff6ff; }
+  .clock-item.overdue { border-left-color: #dc2626; background: #fef2f2; }
+  .clock-item .row1 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .clock-item .code { font-weight: 600; }
+  .clock-item .row2 { color: #64748b; font-size: 12px; margin-top: 4px; }
+  .badge { display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: 12px; color: #fff; white-space: nowrap; }
+  .st-idle { background: #6b7280; }
+  .st-adjusting { background: #2563eb; }
+  .st-needs_adjustment { background: #d97706; }
+  .st-pending_delivery { background: #059669; }
+  .st-delivered { background: #374151; }
+  .badge-overdue { background: #dc2626; }
+  .empty { color: #94a3b8; text-align: center; padding: 40px 0; }
+  .detail-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .detail-head h2 { font-size: 18px; }
+  .meta { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px 16px; margin-bottom: 12px; }
+  .meta .k { font-size: 12px; color: #64748b; }
+  .meta .v { margin-top: 2px; }
+  .open-card { border: 1px solid #bfdbfe; background: #eff6ff; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+  .open-card.overdue { border-color: #fecaca; background: #fef2f2; }
+  .open-card .title { font-weight: 600; margin-bottom: 4px; }
+  .overdue-text { color: #dc2626; font-weight: 600; }
+  .remain-text { color: #2563eb; }
+  .actions { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  .hint { font-size: 12px; color: #64748b; margin-bottom: 8px; }
+  h3 { font-size: 14px; margin: 14px 0 8px; color: #334155; }
+  .timeline { border-left: 2px solid #e2e8f0; margin-left: 6px; padding-left: 14px; display: flex; flex-direction: column; gap: 12px; }
+  .tl-item { position: relative; }
+  .tl-item::before { content: ""; position: absolute; left: -19px; top: 5px; width: 8px; height: 8px; border-radius: 50%; background: #94a3b8; }
+  .tl-item.adjust::before { background: #2563eb; }
+  .tl-item .tl-head { font-size: 12px; color: #64748b; margin-bottom: 2px; }
+  .tl-item .tl-body { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; }
+  .tl-item .retest { margin-top: 6px; border-top: 1px dashed #e2e8f0; padding-top: 6px; }
+  .ok { color: #059669; font-weight: 600; }
+  .ng { color: #dc2626; font-weight: 600; }
+  .waiting { color: #2563eb; font-weight: 600; }
+  #toast { position: fixed; left: 50%; bottom: 30px; transform: translateX(-50%); background: #0f172a; color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 13px; z-index: 10; max-width: 80vw; }
+  #toast.error { background: #b91c1c; }
+  .hidden { display: none !important; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } .list { max-height: none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>🕰️ 钟表调校作业台</h1>
+  <div>
+    <span class="now" id="clock-now"></span>
+    <button class="ghost-light" id="btn-refresh">刷新</button>
+  </div>
+</header>
+<main>
+  <section class="panel">
+    <div class="panel-title">
+      <span>钟表档案</span>
+      <button class="primary" id="toggle-create">＋ 新表建档</button>
+    </div>
+    <form id="create-form" class="card hidden">
+      <div class="form-grid">
+        <div><label>编号 *</label><input name="code" required placeholder="如 CLK-1890-08"></div>
+        <div><label>擒纵类型 *</label><input name="escapementType" required list="esc-list" placeholder="如 瑞士杠杆式"></div>
+        <div><label>摆频 *</label><input name="balanceFrequency" required list="freq-list" placeholder="如 18000vph"></div>
+        <div><label>目标日差（秒/天）</label><input name="targetDailyRateSeconds" type="number" value="30"></div>
+        <div class="full"><label>备注</label><input name="note" placeholder="故障描述、客户要求等"></div>
+        <div class="form-actions">
+          <button type="button" id="cancel-create">取消</button>
+          <button type="submit" class="primary">建档</button>
+        </div>
+      </div>
+    </form>
+    <datalist id="esc-list">
+      <option value="瑞士杠杆式"></option><option value="同轴擒纵"></option>
+      <option value="叉瓦式"></option><option value="冲击式天文台"></option>
+    </datalist>
+    <datalist id="freq-list">
+      <option value="18000vph"></option><option value="21600vph"></option>
+      <option value="28800vph"></option><option value="36000vph"></option>
+    </datalist>
+    <div class="filters">
+      <select id="filter-status">
+        <option value="">全部状态</option>
+        <option value="overdue">逾期未复测</option>
+        <option value="adjusting">调校中</option>
+        <option value="needs_adjustment">待重新调校</option>
+        <option value="pending_delivery">待交付</option>
+        <option value="idle">待调校</option>
+        <option value="delivered">已交付</option>
+      </select>
+      <input id="filter-keyword" placeholder="搜索编号 / 擒纵类型 / 备注">
+    </div>
+    <div id="clock-list" class="list"></div>
+  </section>
+  <section class="panel">
+    <div id="detail-empty" class="empty">← 请选择左侧钟表查看详情</div>
+    <div id="detail-content" class="hidden">
+      <div class="detail-head" id="detail-head"></div>
+      <div class="meta" id="detail-meta"></div>
+      <div id="detail-open"></div>
+      <div class="actions" id="detail-actions"></div>
+      <div id="action-forms"></div>
+      <h3>历史记录</h3>
+      <div id="history-list"></div>
+    </div>
+  </section>
+</main>
+<div id="toast" class="hidden"></div>
+<script>
+const STATUS_META = {
+  idle: { label: "待调校" },
+  adjusting: { label: "调校中" },
+  needs_adjustment: { label: "待重新调校" },
+  pending_delivery: { label: "待交付" },
+  delivered: { label: "已交付" }
+};
+
+let clocks = [];
+let selectedId = null;
+let detail = null;
+let activeForm = null;
+let filterStatus = "";
+let filterKeyword = "";
+
+const $ = (sel) => document.querySelector(sel);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmtTime = (iso) => iso ? new Date(iso).toLocaleString("zh-CN", { hour12: false }) : "—";
+const signed = (n) => (n > 0 ? "+" : "") + n;
+
+function isOverdue(c) { return c.status === "adjusting" && !!c.dueAt && new Date(c.dueAt).getTime() < Date.now(); }
+function overdueSeconds(c) { return Math.max(0, Math.floor((Date.now() - new Date(c.dueAt).getTime()) / 1000)); }
+
+function formatDuration(totalSeconds) {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+  if (d) return `${d}天${h}小时`;
+  if (h) return `${h}小时${m}分`;
+  if (m) return `${m}分`;
+  return `${s}秒`;
+}
+
+// 与服务端一致的排序：逾期置顶，滞留越久越靠前
+function compareClocks(a, b) {
+  const oa = isOverdue(a), ob = isOverdue(b);
+  if (oa !== ob) return oa ? -1 : 1;
+  if (oa && ob) return overdueSeconds(b) - overdueSeconds(a);
+  return new Date(b.createdAt) - new Date(a.createdAt);
+}
+
+async function api(path, options = {}) {
+  const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...options });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `请求失败（${res.status}）`);
+  return body;
+}
+
+let toastTimer = null;
+function toast(message, isError = false) {
+  const el = $("#toast");
+  el.textContent = message;
+  el.className = isError ? "error" : "";
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.add("hidden"), 3200);
+}
+
+function statusBadge(c) {
+  return `<span class="badge st-${c.status}">${STATUS_META[c.status]?.label || c.status}</span>`;
+}
+function overdueBadge(c) {
+  return isOverdue(c) ? `<span class="badge badge-overdue">逾期 · 滞留 ${formatDuration(overdueSeconds(c))}</span>` : "";
+}
+
+async function loadClocks() {
+  const { data } = await api("/clocks");
+  clocks = data;
+  renderList();
+}
+
+function visibleClocks() {
+  return clocks
+    .filter((c) => {
+      if (filterStatus === "overdue") return isOverdue(c);
+      if (filterStatus) return c.status === filterStatus;
+      return true;
+    })
+    .filter((c) => {
+      if (!filterKeyword) return true;
+      const kw = filterKeyword.toLowerCase();
+      return [c.code, c.escapementType, c.balanceFrequency, c.note].some((v) => (v || "").toLowerCase().includes(kw));
+    })
+    .sort(compareClocks);
+}
+
+function renderList() {
+  const list = visibleClocks();
+  $("#clock-list").innerHTML = list.length ? list.map((c) => `
+    <div class="clock-item ${c.id === selectedId ? "selected" : ""} ${isOverdue(c) ? "overdue" : ""}" data-id="${esc(c.id)}">
+      <div class="row1">
+        <span class="code">${esc(c.code)}</span>
+        ${statusBadge(c)}
+        ${overdueBadge(c)}
+      </div>
+      <div class="row2">${esc(c.escapementType)} · ${esc(c.balanceFrequency)} · 目标日差 ±${c.targetDailyRateSeconds}s</div>
+      <div class="row2">${c.openAdjustment
+        ? `进行中调校：约定复测 ${fmtTime(c.dueAt)}`
+        : c.latestRetest
+          ? `最近复测：日差 ${signed(c.latestRetest.dailyRateSeconds)}s / 振幅 ${c.latestRetest.amplitude}°（${c.latestRetest.qualified ? "达标" : "未达标"}）`
+          : "尚无调校记录"}</div>
+    </div>`).join("") : `<div class="empty">没有符合条件的钟表</div>`;
+  document.querySelectorAll(".clock-item").forEach((el) => {
+    el.addEventListener("click", () => selectClock(el.dataset.id).catch((e) => toast(e.message, true)));
+  });
+}
+
+async function selectClock(id) {
+  selectedId = id;
+  activeForm = null;
+  renderList();
+  const [clockRes, historyRes] = await Promise.all([
+    api(`/clocks/${encodeURIComponent(id)}`),
+    api(`/clocks/${encodeURIComponent(id)}/history`)
+  ]);
+  detail = { clock: clockRes.data, ...historyRes.data };
+  renderDetail();
+}
+
+function renderDetail() {
+  if (!detail) return;
+  const c = detail.clock;
+  $("#detail-empty").classList.add("hidden");
+  $("#detail-content").classList.remove("hidden");
+
+  $("#detail-head").innerHTML = `<h2>${esc(c.code)}</h2>${statusBadge(c)}${overdueBadge(c)}`;
+  $("#detail-meta").innerHTML = [
+    ["擒纵类型", esc(c.escapementType)],
+    ["摆频", esc(c.balanceFrequency)],
+    ["目标日差", `±${c.targetDailyRateSeconds} 秒/天`],
+    ["建档时间", fmtTime(c.createdAt)],
+    ["交付时间", c.deliveredAt ? fmtTime(c.deliveredAt) : "—"],
+    ["备注", esc(c.note) || "—"]
+  ].map(([k, v]) => `<div><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+
+  const open = c.openAdjustment;
+  $("#detail-open").innerHTML = open ? `
+    <div class="open-card ${isOverdue(c) ? "overdue" : ""}">
+      <div class="title">进行中的调校（登记于 ${fmtTime(open.createdAt)}）</div>
+      <div>当前日差 ${signed(open.currentDailyRateSeconds)}s · ${esc(open.direction)} · ${esc(open.amount)}</div>
+      ${open.note ? `<div>备注：${esc(open.note)}</div>` : ""}
+      <div>约定复测时间：${fmtTime(open.dueAt)} · ${isOverdue(c)
+        ? `<span class="overdue-text">已逾期，滞留 ${formatDuration(overdueSeconds(c))}</span>`
+        : `<span class="remain-text">剩余 ${formatDuration((new Date(open.dueAt) - Date.now()) / 1000)}</span>`}</div>
+    </div>` : "";
+
+  const actions = [];
+  if (open) actions.push(`<button class="primary" data-act="retest">登记复测</button>`);
+  else actions.push(`<button class="primary" data-act="adjust">登记调校</button>`);
+  if (c.status === "pending_delivery") actions.push(`<button class="success" data-act="deliver">确认交付</button>`);
+  $("#detail-actions").innerHTML = actions.join("");
+  document.querySelectorAll("#detail-actions button").forEach((btn) => {
+    btn.addEventListener("click", () => onAction(btn.dataset.act));
+  });
+
+  renderActionForm();
+  renderHistory();
+}
+
+function renderActionForm() {
+  const box = $("#action-forms");
+  const c = detail.clock;
+  if (activeForm === "adjust") {
+    const def = new Date(Date.now() + 24 * 3600 * 1000);
+    def.setSeconds(0, 0);
+    const local = new Date(def.getTime() - def.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    box.innerHTML = `
+      <form id="adjust-form" class="card">
+        <div class="form-grid">
+          <div><label>当前日差（秒/天）*</label><input name="currentDailyRateSeconds" type="number" required placeholder="快为正，慢为负"></div>
+          <div><label>调校方向 *</label><input name="direction" required list="dir-list" placeholder="如 慢针方向"></div>
+          <div class="full"><label>调校量 *</label><input name="amount" required placeholder="如 游丝快慢针向慢侧微调0.4格"></div>
+          <div><label>约定复测时间 *</label><input name="dueAt" type="datetime-local" required value="${local}"></div>
+          <div><label>备注</label><input name="note"></div>
+          <div class="form-actions">
+            <button type="button" data-close>取消</button>
+            <button type="submit" class="primary">提交调校</button>
+          </div>
+        </div>
+      </form>
+      <datalist id="dir-list">
+        <option value="快针方向"></option><option value="慢针方向"></option>
+        <option value="摆轮配重"></option><option value="游丝整理"></option>
+      </datalist>`;
+    $("#adjust-form").addEventListener("submit", submitAdjustment);
+  } else if (activeForm === "retest") {
+    box.innerHTML = `
+      <form id="retest-form" class="card">
+        <div class="hint">判定规则：|实测日差| ≤ ${c.targetDailyRateSeconds}s 自动判定达标；每项调校只能复测一次。</div>
+        <div class="form-grid">
+          <div><label>实测日差（秒/天）*</label><input name="dailyRateSeconds" type="number" required placeholder="快为正，慢为负"></div>
+          <div><label>振幅（°）*</label><input name="amplitude" type="number" required placeholder="如 252"></div>
+          <div class="full"><label>备注</label><input name="note"></div>
+          <div class="form-actions">
+            <button type="button" data-close>取消</button>
+            <button type="submit" class="primary">提交复测</button>
+          </div>
+        </div>
+      </form>`;
+    $("#retest-form").addEventListener("submit", submitRetest);
+  } else {
+    box.innerHTML = "";
+  }
+  box.querySelectorAll("[data-close]").forEach((btn) => {
+    btn.addEventListener("click", () => { activeForm = null; renderActionForm(); });
+  });
+}
+
+function onAction(act) {
+  if (act === "deliver") return deliverClock().catch((e) => toast(e.message, true));
+  activeForm = activeForm === act ? null : act;
+  renderActionForm();
+}
+
+function renderHistory() {
+  const items = detail.adjustments;
+  $("#history-list").innerHTML = items.length ? `<div class="timeline">` + items.map((a) => `
+    <div class="tl-item adjust">
+      <div class="tl-head">调校 · ${fmtTime(a.createdAt)}</div>
+      <div class="tl-body">
+        <div>当前日差 ${signed(a.currentDailyRateSeconds)}s · ${esc(a.direction)} · ${esc(a.amount)}</div>
+        <div>约定复测：${fmtTime(a.dueAt)}${a.note ? ` · 备注：${esc(a.note)}` : ""}</div>
+        <div class="retest">${a.retest
+          ? `复测 · ${fmtTime(a.retest.testedAt)}：日差 ${signed(a.retest.dailyRateSeconds)}s / 振幅 ${a.retest.amplitude}°
+             <span class="${a.retest.qualified ? "ok" : "ng"}">${a.retest.qualified ? "达标" : "未达标"}</span>${a.retest.note ? ` · ${esc(a.retest.note)}` : ""}`
+          : `<span class="waiting">待复测（进行中）</span>`}</div>
+      </div>
+    </div>`).join("") + `</div>` : `<div class="empty">暂无调校历史</div>`;
+}
+
+async function refreshAll() {
+  await loadClocks();
+  if (selectedId) await selectClock(selectedId);
+}
+
+async function submitAdjustment(e) {
+  e.preventDefault();
+  const f = e.target;
+  try {
+    await api(`/clocks/${encodeURIComponent(selectedId)}/adjustments`, {
+      method: "POST",
+      body: JSON.stringify({
+        currentDailyRateSeconds: Number(f.currentDailyRateSeconds.value),
+        direction: f.direction.value.trim(),
+        amount: f.amount.value.trim(),
+        dueAt: new Date(f.dueAt.value).toISOString(),
+        note: f.note.value.trim()
+      })
+    });
+    toast("调校已登记");
+    await refreshAll();
+  } catch (err) { toast(err.message, true); }
+}
+
+async function submitRetest(e) {
+  e.preventDefault();
+  const f = e.target;
+  try {
+    const { data } = await api(`/clocks/${encodeURIComponent(selectedId)}/retests`, {
+      method: "POST",
+      body: JSON.stringify({
+        dailyRateSeconds: Number(f.dailyRateSeconds.value),
+        amplitude: Number(f.amplitude.value),
+        note: f.note.value.trim()
+      })
+    });
+    toast(data.qualified ? "复测达标，进入待交付" : "复测未达标，需重新调校");
+    await refreshAll();
+  } catch (err) { toast(err.message, true); }
+}
+
+async function deliverClock() {
+  if (!confirm("确认交付该钟表？")) return;
+  try {
+    await api(`/clocks/${encodeURIComponent(selectedId)}/deliver`, { method: "POST" });
+    toast("已交付");
+    await refreshAll();
+  } catch (err) { toast(err.message, true); }
+}
+
+$("#create-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  try {
+    const { data } = await api("/clocks", {
+      method: "POST",
+      body: JSON.stringify({
+        code: f.code.value.trim(),
+        escapementType: f.escapementType.value.trim(),
+        balanceFrequency: f.balanceFrequency.value.trim(),
+        targetDailyRateSeconds: Number(f.targetDailyRateSeconds.value || 30),
+        note: f.note.value.trim()
+      })
+    });
+    toast("建档成功");
+    f.reset();
+    f.targetDailyRateSeconds.value = 30;
+    $("#create-form").classList.add("hidden");
+    await loadClocks();
+    await selectClock(data.id);
+  } catch (err) { toast(err.message, true); }
+});
+$("#toggle-create").addEventListener("click", () => $("#create-form").classList.toggle("hidden"));
+$("#cancel-create").addEventListener("click", () => $("#create-form").classList.add("hidden"));
+$("#filter-status").addEventListener("change", (e) => { filterStatus = e.target.value; renderList(); });
+$("#filter-keyword").addEventListener("input", (e) => { filterKeyword = e.target.value.trim(); renderList(); });
+$("#btn-refresh").addEventListener("click", () => refreshAll().then(() => toast("已刷新")).catch((e) => toast(e.message, true)));
+
+// 顶部时钟每秒走动；列表/详情每15秒按本地时间重算滞留时长并重新排序（不覆盖正在填写的表单）
+setInterval(() => { $("#clock-now").textContent = new Date().toLocaleString("zh-CN", { hour12: false }); }, 1000);
+setInterval(() => { renderList(); if (detail && !activeForm) renderDetail(); }, 15000);
+
+$("#clock-now").textContent = new Date().toLocaleString("zh-CN", { hour12: false });
+loadClocks().catch((e) => toast(e.message, true));
+</script>
+</body>
+</html>

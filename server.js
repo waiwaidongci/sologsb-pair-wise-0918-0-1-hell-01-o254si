@@ -4,6 +4,7 @@ const path = require("path");
 
 const PORT = Number(process.env.PORT || 3021);
 const DB_FILE = path.join(__dirname, "data", "db.json");
+const INDEX_FILE = path.join(__dirname, "public", "index.html");
 
 const initialData = {
   clocks: [
@@ -24,6 +25,7 @@ const initialData = {
       currentDailyRateSeconds: 68,
       direction: "慢针方向",
       amount: "游丝快慢针向慢侧微调0.4格",
+      dueAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
       note: "初次调校，先保守处理",
       createdAt: new Date().toISOString()
     }
@@ -43,13 +45,16 @@ const initialData = {
 };
 
 const routes = [
+  "GET /",
   "GET /health",
   "GET /clocks",
   "POST /clocks",
   "GET /clocks/not-qualified",
+  "GET /clocks/:id",
   "GET /clocks/:id/history",
   "POST /clocks/:id/adjustments",
   "POST /clocks/:id/retests",
+  "POST /clocks/:id/deliver",
   "GET /clocks/:id/latest-retest",
   "GET /adjustments",
   "GET /retests"
@@ -60,13 +65,17 @@ async function ensureDb() {
   try {
     JSON.parse(await readFile(DB_FILE, "utf8"));
   } catch {
-    await writeFile(DB_FILE, JSON.stringify(initialData, null, 2));
+    await writeDb(initialData);
   }
 }
 
 async function readDb() {
   await ensureDb();
-  return JSON.parse(await readFile(DB_FILE, "utf8"));
+  const db = JSON.parse(await readFile(DB_FILE, "utf8"));
+  db.clocks ||= [];
+  db.adjustments ||= [];
+  db.retests ||= [];
+  return db;
 }
 
 async function writeDb(data) {
@@ -104,6 +113,12 @@ function required(body, fields) {
   }
 }
 
+function conflict(message) {
+  const error = new Error(message);
+  error.status = 409;
+  throw error;
+}
+
 function findClock(db, clockId) {
   const clock = db.clocks.find((item) => item.id === clockId);
   if (!clock) {
@@ -126,20 +141,65 @@ function latestAdjustment(db, clockId) {
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0] || null;
 }
 
+function retestOfAdjustment(db, adjustmentId) {
+  return db.retests.find((item) => item.adjustmentId === adjustmentId) || null;
+}
+
+// 进行中的调校 = 尚未复测的调校（每项调校只能复测一次，复测后即关闭）
+function openAdjustment(db, clockId) {
+  return db.adjustments
+    .filter((item) => item.clockId === clockId && !retestOfAdjustment(db, item.id))
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0] || null;
+}
+
+// 状态机全部由调校/复测记录推导，列表、详情、历史共用同一份结果
 function clockSummary(db, clock) {
-  const retest = latestRetest(db, clock.id);
   const adjustment = latestAdjustment(db, clock.id);
+  const open = openAdjustment(db, clock.id);
+  const retest = latestRetest(db, clock.id);
+  let status = "idle";
+  if (open) {
+    status = "adjusting";
+  } else if (adjustment) {
+    const closedRetest = retestOfAdjustment(db, adjustment.id);
+    if (closedRetest && closedRetest.qualified) {
+      status = clock.deliveredAt ? "delivered" : "pending_delivery";
+    } else {
+      status = "needs_adjustment";
+    }
+  }
+  const dueAt = open && open.dueAt ? open.dueAt : null;
+  const overdueSeconds = dueAt ? Math.max(0, Math.floor((Date.now() - new Date(dueAt).getTime()) / 1000)) : 0;
   return {
     ...clock,
+    status,
+    openAdjustment: open,
     latestAdjustment: adjustment,
     latestRetest: retest,
+    dueAt,
+    overdue: overdueSeconds > 0,
+    overdueSeconds,
     qualified: retest ? retest.qualified : false
   };
+}
+
+// 超过约定复测时间的表置顶，滞留越久越靠前
+function compareClocks(a, b) {
+  if (a.overdue !== b.overdue) return a.overdue ? -1 : 1;
+  if (a.overdue && b.overdue) return b.overdueSeconds - a.overdueSeconds;
+  return new Date(b.createdAt) - new Date(a.createdAt);
 }
 
 async function handle(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathname = url.pathname;
+
+  if (req.method === "GET" && (pathname === "/" || pathname === "/index.html")) {
+    const html = await readFile(INDEX_FILE, "utf8");
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    return res.end(html);
+  }
+
   const db = await readDb();
 
   if (req.method === "GET" && pathname === "/health") {
@@ -148,11 +208,14 @@ async function handle(req, res) {
 
   if (req.method === "GET" && pathname === "/clocks") {
     const qualified = url.searchParams.get("qualified");
+    const status = url.searchParams.get("status");
     let data = db.clocks.map((clock) => clockSummary(db, clock));
+    if (status) data = data.filter((clock) => clock.status === status);
     if (qualified !== null) {
       const expected = qualified === "true";
       data = data.filter((clock) => clock.qualified === expected);
     }
+    data.sort(compareClocks);
     return send(res, 200, { data });
   }
 
@@ -174,35 +237,63 @@ async function handle(req, res) {
   }
 
   if (req.method === "GET" && pathname === "/clocks/not-qualified") {
-    const data = db.clocks.map((clock) => clockSummary(db, clock)).filter((clock) => !clock.qualified);
+    const data = db.clocks
+      .map((clock) => clockSummary(db, clock))
+      .filter((clock) => !clock.qualified)
+      .sort(compareClocks);
     return send(res, 200, { data });
+  }
+
+  const clockMatch = pathname.match(/^\/clocks\/([^/]+)$/);
+  if (clockMatch && req.method === "GET") {
+    const clock = findClock(db, clockMatch[1]);
+    return send(res, 200, { data: clockSummary(db, clock) });
   }
 
   const historyMatch = pathname.match(/^\/clocks\/([^/]+)\/history$/);
   if (historyMatch && req.method === "GET") {
     const clock = findClock(db, historyMatch[1]);
-    const adjustments = db.adjustments.filter((item) => item.clockId === clock.id);
-    const retests = db.retests.filter((item) => item.clockId === clock.id);
-    return send(res, 200, { data: { clock, adjustments, retests, latestRetest: latestRetest(db, clock.id) } });
+    const adjustments = db.adjustments
+      .filter((item) => item.clockId === clock.id)
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .map((item) => ({ ...item, retest: retestOfAdjustment(db, item.id) }));
+    const retests = db.retests
+      .filter((item) => item.clockId === clock.id)
+      .sort((a, b) => new Date(b.testedAt) - new Date(a.testedAt));
+    return send(res, 200, {
+      data: { clock: clockSummary(db, clock), adjustments, retests, latestRetest: latestRetest(db, clock.id) }
+    });
   }
 
   const adjustmentMatch = pathname.match(/^\/clocks\/([^/]+)\/adjustments$/);
   if (adjustmentMatch && req.method === "POST") {
     const clock = findClock(db, adjustmentMatch[1]);
     const body = await parseBody(req);
-    required(body, ["currentDailyRateSeconds", "direction", "amount"]);
+    required(body, ["currentDailyRateSeconds", "direction", "amount", "dueAt"]);
+    if (openAdjustment(db, clock.id)) {
+      conflict("每只表只能有一项进行中调校，请先完成复测");
+    }
+    const dueAt = new Date(body.dueAt);
+    if (Number.isNaN(dueAt.getTime())) {
+      const error = new Error("约定复测时间 dueAt 格式不正确");
+      error.status = 400;
+      throw error;
+    }
     const adjustment = {
       id: makeId("adjustment"),
       clockId: clock.id,
       currentDailyRateSeconds: Number(body.currentDailyRateSeconds),
       direction: body.direction,
       amount: body.amount,
+      dueAt: dueAt.toISOString(),
       note: body.note || "",
       createdAt: new Date().toISOString()
     };
     db.adjustments.push(adjustment);
+    // 重新调校立即让交付失效
+    if (clock.deliveredAt) delete clock.deliveredAt;
     await writeDb(db);
-    return send(res, 201, { data: adjustment });
+    return send(res, 201, { data: adjustment, clock: clockSummary(db, clock) });
   }
 
   const retestMatch = pathname.match(/^\/clocks\/([^/]+)\/retests$/);
@@ -210,14 +301,20 @@ async function handle(req, res) {
     const clock = findClock(db, retestMatch[1]);
     const body = await parseBody(req);
     required(body, ["dailyRateSeconds", "amplitude"]);
-    const adjustmentId = body.adjustmentId || latestAdjustment(db, clock.id)?.id || null;
+    const open = openAdjustment(db, clock.id);
+    if (!open) {
+      conflict("当前没有进行中的调校：复测未达标必须先重新调校");
+    }
+    if (body.adjustmentId && body.adjustmentId !== open.id) {
+      conflict("该项调校已完成复测，每项调校只能复测一次");
+    }
     const qualified = body.qualified !== undefined
       ? Boolean(body.qualified)
       : Math.abs(Number(body.dailyRateSeconds)) <= Number(clock.targetDailyRateSeconds);
     const retest = {
       id: makeId("retest"),
       clockId: clock.id,
-      adjustmentId,
+      adjustmentId: open.id,
       testedAt: body.testedAt || new Date().toISOString(),
       dailyRateSeconds: Number(body.dailyRateSeconds),
       amplitude: Number(body.amplitude),
@@ -227,6 +324,17 @@ async function handle(req, res) {
     db.retests.push(retest);
     await writeDb(db);
     return send(res, 201, { data: retest, clock: clockSummary(db, clock) });
+  }
+
+  const deliverMatch = pathname.match(/^\/clocks\/([^/]+)\/deliver$/);
+  if (deliverMatch && req.method === "POST") {
+    const clock = findClock(db, deliverMatch[1]);
+    if (clockSummary(db, clock).status !== "pending_delivery") {
+      conflict("仅复测达标、待交付的钟表才能交付");
+    }
+    clock.deliveredAt = new Date().toISOString();
+    await writeDb(db);
+    return send(res, 200, { data: clockSummary(db, clock) });
   }
 
   const latestMatch = pathname.match(/^\/clocks\/([^/]+)\/latest-retest$/);
